@@ -6,29 +6,40 @@
 # done
 
 get_dirname () {
-  return 'run1'
+  echo 'run1'
 }
 
 many_args () {
-  vals=()
-  while [[ $("$1" | cut -c1) != '-' ]]; do
-    vals+=($1)
+  VALS=()
+  while [[ $(echo "$1" | cut -c1) != '-' ]]; do
+    if [ -z "$1" ]; then
+      return
+    fi
+    VALS+=($1)
     shift
   done
-  return vals
 }
 
 
 script_args () {
   ARGSTRING=''
-  while [[ $("$1" | cut -c1) != '-' ]]; do
+  while [[ $(echo "$1" | cut -c1) != '-' ]]; do
+    if [ -z "$1" ]; then
+      # trim leading space
+      ARGSTRING=${ARGSTRING:1}
+      return
+    fi
     if [[ "$1" =~ '=' ]]; then
       flag=`echo $1 | cut -d = -f1`
-      val=`echo$1 | cut -d = -f1`
+      val=`echo $1 | cut -d = -f2`
       ARGSTRING+=" --${flag} ${val}"
     else
       ARGSTRING+=" $1"
     fi
+    shift
+  done
+  # trim leading space
+  ARGSTRING=${ARGSTRING:1}
 }
 
 parse_args () {
@@ -42,7 +53,9 @@ parse_args () {
           HOSTS=( $(<"$2") )
         else
           shift
-          HOSTS=`many_args "$@"`
+          # set VALS
+          many_args $@
+          HOSTS=( ${VALS[@]} )
           continue
         fi
         shift 2
@@ -53,7 +66,9 @@ parse_args () {
       ;;
       -a | --args)
         shift
-        SCRIPTARGS+=`script_args "$@"`
+        # set ARGSTRING
+        script_args $@
+        SCRIPTARGS+=( ${ARGSTRING} )
       ;;
       -k | --keyfile)
         KEYFILE="$2"
@@ -74,7 +89,7 @@ parse_args () {
 run_parallel () {
 
   SCRIPTARGS=()
-  parse_args "$@"
+  parse_args $@
 
   echo $HOSTS
   echo $SCRIPT
@@ -88,7 +103,9 @@ run_parallel () {
     return 1
   fi
 
-  DIRNAME="$DIRNAME" || `get_dirname`
+  if [ -z $DIRNAME ]; then
+     DIRNAME=`get_dirname`
+  fi
   if [ ! -d $DIRNAME ]; then
     mkdir $DIRNAME
   fi
@@ -98,9 +115,9 @@ run_parallel () {
     host=${HOSTS[$i]}
     user=$(echo $host | cut -d '@' -f 1)
     remote_dir="/home/$user/"
-    arg=${ARGS[$i]}
+    args=${SCRIPTARGS[$i]}
     scp -i $KEYFILE "$SCRIPT" "${host}:${remote_dir}"
-    ssh -i $KEYFILE -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$host" "chmod 700 ${remote_dir}$SCRIPT && ${remote_dir}$SCRIPT" "${ARGS[@]}" 1>"$DIRNAME/$host.log" 2>&1 &
+    ssh -i $KEYFILE -n -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$host" "chmod 500 ${remote_dir}$SCRIPT && ${remote_dir}$SCRIPT" ${args} 1>"$DIRNAME/$host.log" 2>&1 &
   done
   wait
 }
